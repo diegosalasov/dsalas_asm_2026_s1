@@ -1,4 +1,3 @@
-import os
 import time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -177,22 +176,7 @@ def run_timing_experiment(sample_sizes: list[int], repetitions: int = 3) -> tupl
     return dft_times, fft_times
 
 
-def ensure_images_folder(folder_name: str = "images") -> str:
-    """
-    Crea la carpeta de salida para imágenes si no existe.
-    """
-    os.makedirs(folder_name, exist_ok=True)
-    return folder_name
-
-
-def build_image_path(folder_name: str, file_name: str) -> str:
-    """
-    Construye la ruta completa de una imagen dentro de la carpeta indicada.
-    """
-    return os.path.join(folder_name, file_name)
-
-
-def plot_time_signal(time_axis: np.ndarray, signal: np.ndarray, file_path: str) -> None:
+def plot_time_signal(time_axis: np.ndarray, signal: np.ndarray) -> None:
     """
     Grafica la señal en el dominio del tiempo.
     """
@@ -203,12 +187,11 @@ def plot_time_signal(time_axis: np.ndarray, signal: np.ndarray, file_path: str) 
     plt.ylabel("Amplitude")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(file_path, dpi=300)
     plt.show()
 
 
 def plot_transform_summary(
-    spectrum: np.ndarray, sample_rate: int, file_path: str, transform_name: str
+    spectrum: np.ndarray, sample_rate: int, transform_name: str
 ) -> None:
     """
     Grafica en una sola figura la representación compleja,
@@ -247,12 +230,11 @@ def plot_transform_summary(
     plt.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(file_path, dpi=300)
     plt.show()
 
 
 def plot_execution_times(
-    sample_sizes: list[int], dft_times: list[float], fft_times: list[float], file_path: str
+    sample_sizes: list[int], dft_times: list[float], fft_times: list[float]
 ) -> None:
     """
     Grafica la comparación de tiempos de ejecución entre DFT y FFT.
@@ -268,7 +250,6 @@ def plot_execution_times(
     plt.grid(True, which="both", alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(file_path, dpi=300)
     plt.show()
 
 
@@ -276,8 +257,6 @@ def main() -> None:
     """
     Ejecuta los experimentos
     """
-    images_folder = ensure_images_folder("images")
-
     sample_rate = 1024
     sample_count = 1024
 
@@ -302,21 +281,18 @@ def main() -> None:
 
     plot_time_signal(
         time_axis,
-        signal,
-        build_image_path(images_folder, "time_signal.png")
+        signal
     )
 
     plot_transform_summary(
         dft_spectrum,
         sample_rate,
-        build_image_path(images_folder, "dft_summary.png"),
         "DFT"
     )
 
     plot_transform_summary(
         fft_spectrum,
         sample_rate,
-        build_image_path(images_folder, "fft_summary.png"),
         "FFT"
     )
 
@@ -327,8 +303,7 @@ def main() -> None:
     plot_execution_times(
         sample_sizes,
         dft_times,
-        fft_times,
-        build_image_path(images_folder, "execution_time_comparison.png")
+        fft_times
     )
 
 
