@@ -8,6 +8,7 @@
 #define FOOTER 0x55           // Marcador de fin de trama
 #define SAMPLE_PERIOD 125     // Periodo de muestreo en microsegundos (para 8000 Hz)
 #define BAUD_RATE_PC 1000000       // Velocidad de comunicación serial (puede ajustarse según estabilidad)
+#define SERIAL_2_BAUD 115200
 
 /* --- CONSTANTES DE CONTROL --- */
 #define ACK_SIGNAL 'K'   // Señal de ACK para la comunicación entre tarjetas (puedes cambiarla si quieres)
@@ -46,7 +47,7 @@ void setup() {
   // Velocidad: 1 Mbps (puedes bajarla a 115200 si falla)
   // Protocolo: SERIAL_8N1 (8 bits, sin paridad, 1 stop)
   // Pines: RX=16, TX=17
-  Serial2.begin(115200, SERIAL_8N1, 16, 17);
+  Serial2.begin(SERIAL_2_BAUD, SERIAL_8N1, 16, 17);
 
   
   pinMode(25, OUTPUT);        // Pin del DAC interno del ESP32
@@ -99,7 +100,7 @@ void loop() {
       // applyEnergyBasedCompression(vReal, vImag, N_FFT, 0.95);
 
 
-      /*
+      
       // --- COMUNICACIÓN CON TARJETA 2 ---
       sendFftBlock(); // Envía los floats procesados a la otra tarjeta
 
@@ -116,7 +117,6 @@ void loop() {
         if (millis() - t_hshake > 200) break; 
         yield();
       }
-      */
 
       // --- LIMPIEZA Y REPETICIÓN ---
       // No necesitamos Serial.write('K') porque el nuevo 'G' al inicio del loop

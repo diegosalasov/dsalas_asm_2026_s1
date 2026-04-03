@@ -64,7 +64,7 @@ def transmitir(muestras, tam_bloque):
             ser.write(trama)
             
             # Feedback de progreso
-            if i % 10 == 0:
+            if True:
                 print(f"Enviando bloque {i}/{num_bloques} - Progreso: {(i/num_bloques)*100:.1f}%", end='\r')
             
             i += 1 # Avanzar al siguiente bloque solo después de enviarlo
