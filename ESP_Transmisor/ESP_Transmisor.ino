@@ -15,13 +15,13 @@ int block_counter = 0;        // Contador de bloques N recibidos
 
 
 /* --- VARIABLES FFT --- */
-double vReal[N_FFT];
-double vImag[N_FFT];
-ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, N_FFT, 8000);
+float vReal[N_FFT];
+float vImag[N_FFT];
+ArduinoFFT<float> FFT = ArduinoFFT<float>(vReal, vImag, N_FFT, 8000);
 
 struct FrequencyGroup {
     uint16_t index;     // Índice 'k' de la FFT
-    double energy;      // Energía del par (k y N-k)
+    float energy;      // Energía del par (k y N-k)
 };
 
 void setup() {
@@ -68,7 +68,7 @@ void loop() {
           
           // Preparar datos (Convertir uint8 a double y limpiar imaginarios)
           for (int i = 0; i < N_FFT; i++) {
-            vReal[i] = (double)FFT_buffer[i];
+            vReal[i] = (float)FFT_buffer[i];
             vImag[i] = 0.0;
           }
 
