@@ -1,43 +1,35 @@
 #include <Arduino.h>
-#include "arduinoFFT.h"
+
+const uint8_t HEADER = 0xAA;
+const uint8_t FOOTER = 0x55;
+const char ACK_SIGNAL = 'K';
 
 void setup() {
-  // put your setup code here, to run once:
+  // IMPORTANTE: El buffer debe ser lo suficientemente grande para 2 tramas
+  Serial2.setRxBufferSize(4096); 
+  Serial2.begin(115200, SERIAL_8N1, 16, 17);
 
 }
 
+// Tarjeta 2 - Loop optimizado
 void loop() {
-  // Verificamos si hay suficientes bytes para un bloque completo de doubles
-  // (N_FFT * sizeof(double) * 2) + Header + Footer
-  if (Serial2.available() >= ((N_FFT * 16) + 2)) {
+  // Solo entrar si hay al menos una trama completa esperando
+  if (Serial2.available() >= 2050) {
     
     if (Serial2.read() == HEADER) {
-      // 1. LEER LOS DATOS DE LA FFT (vReal y vImag)
-      Serial2.readBytes((char*)vReal, N_FFT * sizeof(double));
-      Serial2.readBytes((char*)vImag, N_FFT * sizeof(double));
+      uint8_t dump[2048];
+      // readBytes tiene un timeout interno, es más seguro
+      size_t leidos = Serial2.readBytes(dump, 2048); 
       
-      if (Serial2.read() == FOOTER) {
-        
-        // 2. COMPRESIÓN (Opcional en esta tarjeta)
-        applyEnergyBasedCompression(vReal, vImag, N_FFT, 0.95);
-
-        // 3. IFFT (Regreso al tiempo)
-        FFT.compute(FFT_REVERSE);
-
-        // 4. REPRODUCCIÓN (Escalado 1/N)
-        for (int i = 0; i < N_FFT; i++) {
-          uint32_t t_inicio = micros();
-          
-          double sample = vReal[i] / N_FFT; // Normalización indispensable
-          
-          if (sample > 255) sample = 255;
-          if (sample < 0)   sample = 0;
-
-          dacWrite(25, (uint8_t)sample);
-          
-          while ((micros() - t_inicio) < SAMPLE_PERIOD);
-        }
+      uint8_t footer = Serial2.read();
+      
+      if (footer == FOOTER && leidos == 2048) {
+        // TRAMA PERFECTA
+        Serial2.write(ACK_SIGNAL); 
+      } else {
+        // Si falló, limpiamos el buffer agresivamente para no arrastrar el error
+        while(Serial2.available() > 0) Serial2.read();
       }
     }
   }
-} 
+}
