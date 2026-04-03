@@ -4,9 +4,12 @@ import numpy as np
 import librosa
 
 # --- CONFIGURACIÓN ---
-N = 128  # Tamaño de los datos
+N = 256  # Tamaño de los datos
 PUERTO = 'COM12'
 BAUD = 1000000
+SAMPLERATE = 8000
+HEADER = 0xAA
+FOOTER = 0x55
 
 def transmitir(muestras, tam_bloque):
     ser = serial.Serial(PUERTO, BAUD, timeout=0.5)
@@ -32,7 +35,7 @@ def transmitir(muestras, tam_bloque):
             
         # --- EMPAQUETADO ---
         # Header (0xAA) + Datos + Footer (0x55)
-        trama = bytearray([0xAA]) + bloque.tobytes() + bytearray([0x55])
+        trama = bytearray([HEADER]) + bloque.tobytes() + bytearray([FOOTER])
         
         ser.write(trama)
         
@@ -48,8 +51,24 @@ def transmitir(muestras, tam_bloque):
     ser.close()
     print("\nTransmisión exitosa.")
 
-# Cargar y normalizar (Volumen a 150 para evitar golpeteo)
-data, _ = librosa.load("Audio/cancion_pokemon.mp3", sr=8000, mono=True)
-data = ((data - data.min()) / (data.max() - data.min()) * 150).astype(np.uint8)
+
+# Carga el archivo con una frecuencia de muestreo específica (8000Hz)
+# Librosa devuelve 'audio' como un array de floats entre -1.0 y 1.0
+audio_raw, _ = librosa.load("Audio/cancion_pokemon.mp3", sr=SAMPLERATE, mono=True)
+
+# Restamos el valor mínimo para que el punto más bajo sea exactamente 0
+# Ahora todos los valores de la canción son positivos
+audio_positivo = audio_raw - audio_raw.min()
+
+# Dividimos por el nuevo máximo para que el rango sea de 0.0 a 1.0
+audio_normalizado = audio_positivo / audio_positivo.max()
+
+# Multiplicamos por 150 para definir el "techo" de volumen (de 255 posibles)
+audio_escalado = audio_normalizado * 150
+
+# Convertimos de float a unsigned integer de 8 bits (0-255)
+# Esto es lo que finalmente viajará al ESP32
+data = audio_escalado.astype(np.uint8)
+
 
 transmitir(data, N)
