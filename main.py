@@ -2,61 +2,54 @@ import serial
 import time
 import numpy as np
 import librosa
-import os
 
 # --- CONFIGURACIÓN ---
-N = 128  # 2^7 (Cumple con potencia de 2)
+N = 128  # Tamaño de los datos
 PUERTO = 'COM12'
-BAUD = 115200
-SAMPLING_RATE = 8000
+BAUD = 1000000
 
-def transmitir_128(muestras):
-    # Inicializar Serial
-    ser = serial.Serial(PUERTO, BAUD, timeout=1)
-    time.sleep(3) # Esperar reinicio
+def transmitir(muestras, tam_bloque):
+    ser = serial.Serial(PUERTO, BAUD, timeout=0.5)
+    time.sleep(2)
     ser.reset_input_buffer()
     
-    # Sincronización Inicial
-    print("Esperando 'S' del ESP32...")
+    print("Sincronizando...")
     while True:
-        if ser.in_waiting > 0:
-            if ser.read() == b'S':
-                ser.write(b'A')
-                break
-    
-    print("Sincronizado. Enviando canción en bloques de 128...")
+        ser.write(b'S')
+        if ser.read(1) == b'A':
+            break
+        time.sleep(0.1)
+
     total = len(muestras)
+    num_bloques = int(np.ceil(total / tam_bloque))
     
-    # Enviar en bloques de 128 muestras
-    for i in range(0, total, N):
-        bloque = muestras[i : i + N]
-        if len(bloque) < N:
-            bloque = np.pad(bloque, (0, N - len(bloque)), 'constant', constant_values=127)
+    for i in range(num_bloques):
+        inicio = i * tam_bloque
+        bloque = muestras[inicio:inicio+tam_bloque]
         
-        # Enviar bloque
-        ser.write(bloque.tobytes())
-        ser.flush()
-
-        # Esperar la 'K' con un pequeño margen
-        timeout_at = time.time() + 2
-        confirmado = False
-        while time.time() < timeout_at:
-            if ser.in_waiting > 0:
-                if ser.read() == b'K':
-                    confirmado = True
-                    break
+        if len(bloque) < tam_bloque:
+            bloque = np.pad(bloque, (0, tam_bloque - len(bloque)), 'constant', constant_values=127)
+            
+        # --- EMPAQUETADO ---
+        # Header (0xAA) + Datos + Footer (0x55)
+        trama = bytearray([0xAA]) + bloque.tobytes() + bytearray([0x55])
         
-        if not confirmado:
-            print(f"\n Error en bloque {i//N}")
-            return
+        ser.write(trama)
+        
+        # Esperar la confirmación del ESP32
+        confirmacion = ser.read(1)
+        if confirmacion != b'K':
+            # Si el ESP32 manda 'E' (Error), reintentamos o notificamos
+            print(f"\nError de trama en bloque {i}")
+            
+        if i % 20 == 0:
+            print(f"Progreso: {(i/num_bloques)*100:.1f}%", end='\r')
 
-        print(f"Progreso: {(i/total)*100:.2f}%", end='\r')
-    
     ser.close()
-    print("\n Canción enviada con éxito.")
+    print("\nTransmisión exitosa.")
 
-# Cargar y normalizar
-data, _ = librosa.load("Audio/cancion_la.mp3", SAMPLING_RATE, mono=True)
-data = ((data - data.min()) / (data.max() - data.min()) * 255).astype(np.uint8)
+# Cargar y normalizar (Volumen a 150 para evitar golpeteo)
+data, _ = librosa.load("Audio/cancion_pokemon.mp3", sr=8000, mono=True)
+data = ((data - data.min()) / (data.max() - data.min()) * 150).astype(np.uint8)
 
-transmitir_128(data)
+transmitir(data, N)
