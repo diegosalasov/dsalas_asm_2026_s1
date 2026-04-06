@@ -83,7 +83,7 @@ def transmitir(muestras, tam_bloque):
 
 # Carga el archivo con una frecuencia de muestreo específica (8000Hz)
 # Librosa devuelve 'audio' como un array de floats entre -1.0 y 1.0
-audio_raw, _ = librosa.load("Audio/cancion_pokemon.mp3", sr=SAMPLERATE, mono=True)
+audio_raw, _ = librosa.load("Audio/cancion_ele.mp3", sr=SAMPLERATE, mono=True)
 
 # Restamos el valor mínimo para que el punto más bajo sea exactamente 0
 # Ahora todos los valores de la canción son positivos

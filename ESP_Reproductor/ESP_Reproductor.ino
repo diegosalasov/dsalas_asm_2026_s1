@@ -1,63 +1,90 @@
 #include <Arduino.h>
 #include "arduinoFFT.h"
+#include <ESP32DMASPISlave.h> // Usamos la versión Slave para recibir
 
-#define N_FFT 256
-#define HEADER 0xAA
-#define FOOTER 0x55
-#define SAMPLE_PERIOD 125 // 8000 Hz -> 1/8000 = 125us
-#define ACK_SIGNAL 'K'
-#define SERIAL_2_BAUD 250000
+// --- Configuración de Protocolo ---
+#define N_FFT          256
+#define HEADER         0xAA
+#define FOOTER         0x55
+#define SAMPLE_PERIOD  125      // 8000 Hz -> 125us por muestra
 
-// Buffers para la IFFT
+// --- Configuración SPI DMA (VSPI Nativo) ---
+#define VSPI_MISO      19
+#define VSPI_MOSI      23
+#define VSPI_SCLK      18
+#define VSPI_SS        5
+
+// Cálculo del Buffer: 2050 datos + 2 alineación + 4 compensación bug = 2056
+#define SPI_BUFFER_SIZE 2056
+
+// --- Variables y Objetos ---
 float vReal[N_FFT];
 float vImag[N_FFT];
 ArduinoFFT<float> FFT = ArduinoFFT<float>(vReal, vImag, N_FFT, 8000);
 
+ESP32DMASPI::Slave slave;
+uint8_t *dma_tx_buf;
+uint8_t *dma_rx_buf;
+
 void setup() {
-  // Buffer grande para recibir los 2050 bytes sin pérdidas
-  Serial2.setRxBufferSize(2560); 
-  Serial2.begin(SERIAL_2_BAUD, SERIAL_8N1, 16, 17);
-  
-  // Pin 25 es el DAC1 interno del ESP32
-  pinMode(25, OUTPUT); 
+    // Inicializar Serial solo para depuración (opcional)
+    Serial.begin(115200);
+
+    // Pin 25 es el DAC1 interno del ESP32
+    pinMode(25, OUTPUT); 
+
+    // --- Configuración de Buffers DMA ---
+    dma_tx_buf = slave.allocDMABuffer(SPI_BUFFER_SIZE);
+    dma_rx_buf = slave.allocDMABuffer(SPI_BUFFER_SIZE);
+    
+    // Limpiar buffers
+    memset(dma_tx_buf, 0, SPI_BUFFER_SIZE);
+    memset(dma_rx_buf, 0, SPI_BUFFER_SIZE);
+
+    // --- Configuración del Esclavo SPI ---
+    // Según los "Known Issues", SPI_MODE1 es el más estable para evitar bit-shift
+    slave.setDataMode(SPI_MODE1); 
+    slave.setMaxTransferSize(SPI_BUFFER_SIZE);
+    slave.setQueueSize(1);
+    
+    // Iniciar con pines nativos VSPI
+    // slave.begin(VSPI_HOST, SCK, MISO, MOSI, SS)
+    slave.begin(VSPI_HOST, VSPI_SCLK, VSPI_MISO, VSPI_MOSI, VSPI_SS);
+
+    Serial.println("Esclavo SPI DMA VSPI Iniciado");
 }
 
 void loop() {
-  // Esperar la trama completa: Header(1) + vReal(1024) + vImag(1024) + Footer(1) = 2050 bytes
-  if (Serial2.available() >= 2050) {
-    
-    if (Serial2.read() == HEADER) {
-      
-      // Leemos los floats directamente a los arrays de la FFT
-      // vReal y vImag ocupan 1024 bytes cada uno (256 * 4 bytes)
-      Serial2.readBytes((uint8_t*)vReal, N_FFT * sizeof(float));
-      Serial2.readBytes((uint8_t*)vImag, N_FFT * sizeof(float));
-      
-      if (Serial2.read() == FOOTER) {
-        // 1. Avisar de inmediato a la Tarjeta 1 para que pida más bloques a Python
-        Serial2.write(ACK_SIGNAL); 
+    // 1. Esperar y recibir la transferencia por DMA
+    // Esta función bloquea hasta que el Maestro completa el envío de SPI_BUFFER_SIZE bytes
+    uint32_t received_bytes = slave.transfer(dma_tx_buf, dma_rx_buf, SPI_BUFFER_SIZE);
 
-        // 2. Transformada Inversa: Frecuencia -> Tiempo
-        FFT.compute(FFT_REVERSE);
+    if (received_bytes > 0) {
+        // 2. Verificar sincronía (Header y Footer)
+        // El footer está en el índice 2049 (1 + 1024 + 1024)
+        if (dma_rx_buf[0] == HEADER && dma_rx_buf[1 + sizeof(vReal) + sizeof(vImag)] == FOOTER) {
+            
+            // 3. Desempaquetar los floats del buffer DMA a los arrays de la FFT
+            memcpy(vReal, &dma_rx_buf[1], sizeof(vReal));
+            memcpy(vImag, &dma_rx_buf[1 + sizeof(vReal)], sizeof(vImag));
 
-        // 3. Reproducción por el DAC
-        // Recorremos los 256 valores reconstruidos
-        for (int i = 0; i < N_FFT; i++) {
-          uint32_t t_inicio = micros();
-          
-          // El resultado de la IFFT puede tener valores fuera de 0-255
-          // Hacemos un cast simple, pero si escuchas ruido, podrías normalizarlo
-          dacWrite(25, (uint8_t)vReal[i]);
-          
-          // Mantener el sample rate de 8000Hz (125 microsegundos por muestra)
-          while ((micros() - t_inicio) < SAMPLE_PERIOD);
+            // 4. Procesamiento: Transformada Inversa (Frecuencia -> Tiempo)
+            FFT.compute(FFT_REVERSE);
+
+            // 5. Reproducción por el DAC
+            for (int i = 0; i < N_FFT; i++) {
+                uint32_t t_inicio = micros();
+                
+                // Aplicamos constrain para asegurar que el valor esté en rango DAC (0-255)
+                dacWrite(25, (uint8_t)constrain(vReal[i], 0, 255));
+                
+                // Mantener el sample rate de 8000Hz
+                while ((micros() - t_inicio) < SAMPLE_PERIOD);
+            }
+            
+        } else {
+            // En caso de error de sincronía, limpiamos el buffer RX
+            memset(dma_rx_buf, 0, SPI_BUFFER_SIZE);
         }
-        
-      } else {
-        // Error de sincronía: Limpiar buffer
-        while(Serial2.available() > 0) Serial2.read();
-      }
     }
-  }
 }
-

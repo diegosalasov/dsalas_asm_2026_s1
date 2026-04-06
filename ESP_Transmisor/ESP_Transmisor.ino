@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "arduinoFFT.h"
+#include <ESP32DMASPIMaster.h>
 
 /* --- CONSTANTES DE COMUNICACIÓN --- */
 #define N 256                 // Tamaño de cada bloque de datos recibido
@@ -7,8 +8,7 @@
 #define HEADER 0xAA           // Marcador de inicio de trama
 #define FOOTER 0x55           // Marcador de fin de trama
 #define SAMPLE_PERIOD 125     // Periodo de muestreo en microsegundos (para 8000 Hz)
-#define BAUD_RATE_PC 1000000       // Velocidad de comunicación serial (puede ajustarse según estabilidad)
-#define SERIAL_2_BAUD 250000
+#define BAUD_RATE_PC 1000000       // Velocidad de comunicación serial (puede ajustarse según estabilidad
 
 /* --- CONSTANTES DE CONTROL --- */
 #define ACK_SIGNAL 'K'   // Señal de ACK para la comunicación entre tarjetas (puedes cambiarla si quieres)
@@ -37,24 +37,45 @@ struct component {
 };
 
 
+// --- Definición de Pines SPI (VSPI Nativo) ---
+#define VSPI_MISO      19
+#define VSPI_MOSI      23
+#define VSPI_SCLK      18
+#define VSPI_SS        5
+
+// 2056 bytes garantiza:
+// 1. Alineación de 4 bytes para el DMA.
+// 2. Que los 4 bytes que el esclavo "pierde" sean bytes vacíos al final.
+#define SPI_BUFFER_SIZE  2056
+
+/// --- Configuración del SPI ---
+#define SPI_FREQUENCY 8000000 // 8 MHz, puedes ajustar según estabilidad
+// (256 * 4) + (256 * 4) + 1 (Header) + 1 (Footer) + 4 bytes (bug) = 2054 
+#define SPI_BUFFER_SIZE  2056
+
+// --- Recursos DMA ---
+uint8_t *dma_tx_buf;
+uint8_t *dma_rx_buf;
+
+// Instancia (cambiar a Slave si es el caso)
+ESP32DMASPI::Master master;
+
 
 void setup() {
+  // to use DMA buffer, use these methods to allocate buffer
+  dma_tx_buf = master.allocDMABuffer(SPI_BUFFER_SIZE);
+  dma_rx_buf = master.allocDMABuffer(SPI_BUFFER_SIZE);
+
+  master.setDataMode(SPI_MODE0);
+  master.setFrequency(1000000);       
+  master.setMaxTransferSize(SPI_BUFFER_SIZE); 
+  master.begin(VSPI_HOST, VSPI_SCLK, VSPI_MISO, VSPI_MOSI, VSPI_SS);
+
+
   // Aumentamos el buffer de hardware de la UART para evitar desbordamientos
   Serial.setRxBufferSize(2048); 
   Serial.begin(BAUD_RATE_PC);
   
-
-  // Configuración del Buffer de recepción para el Handshake
-  Serial2.setRxBufferSize(1024); 
-
-  // Inicialización de UART2: 
-  // Velocidad: 1 Mbps (puedes bajarla a 115200 si falla)
-  // Protocolo: SERIAL_8N1 (8 bits, sin paridad, 1 stop)
-  // Pines: RX=16, TX=17
-  Serial2.begin(SERIAL_2_BAUD, SERIAL_8N1, 16, 17);
-
-  
-  pinMode(25, OUTPUT);        // Pin del DAC interno del ESP32
 
   // --- HANDSHAKE INICIAL ---
   // El ESP32 espera recibir 'S' para confirmar que Python está listo
@@ -68,15 +89,19 @@ void setup() {
 
 void loop() {
   // 1. SOLICITAR BLOQUE A PYTHON
-  // Enviamos 'G' para que Python nos mande UNA trama (Header + 256 bytes + Footer)
+  while(Serial.available() > 0) Serial.read(); 
+
+  // 1. SOLICITAR BLOQUE A PYTHON
   Serial.write(GET);
 
-  // 2. ESPERAR HASTA QUE LLEGUE LA TRAMA COMPLETA (258 bytes)
-  // Usamos un pequeño timeout para que no se quede colgado si Python falla
+  // 2. ESPERAR CON TIMEOUT MEJORADO
   uint32_t t_espera = millis();
   while (Serial.available() < (N + 2)) {
-    if (millis() - t_espera > 500) {
-      Serial.write(GET); // Re-solicitar si Python se tardó mucho
+    if (millis() - t_espera > 1000) { // Sube a 1s para ser más tolerante
+      // En lugar de enviar otro GET y arriesgarte a duplicar, 
+      // mejor limpia y reinicia el loop
+      while(Serial.available() > 0) Serial.read();
+      Serial.write(GET); 
       t_espera = millis();
     }
     yield(); 
@@ -101,46 +126,12 @@ void loop() {
       FFT.compute(FFT_FORWARD);
       
       // Aquí podrías aplicar la compresión si la descomentas:
-      compressFft(N, 0.95); 
+      compressFft(N, 1); 
 
-      // 2. Transformada Inversa: Frecuencia -> Tiempo
-      FFT.compute(FFT_REVERSE);
-
-      // 3. Reproducción por el DAC
-      // Recorremos los 256 valores reconstruidos
-      for (int i = 0; i < N_FFT; i++) {
-        uint32_t t_inicio = micros();
-        
-        // El resultado de la IFFT puede tener valores fuera de 0-255
-        // Hacemos un cast simple, pero si escuchas ruido, podrías normalizarlo
-        dacWrite(25, (uint8_t)vReal[i]);
-        
-        // Mantener el sample rate de 8000Hz (125 microsegundos por muestra)
-        while ((micros() - t_inicio) < SAMPLE_PERIOD);
-      }
-
-      /*
-      // --- COMUNICACIÓN CON TARJETA 2 ---
+      
       sendFftBlock(); // Envía los floats procesados a la otra tarjeta
 
-      // --- BLOQUEO POR HANDSHAKE (ESPERA A T2) ---
-      // IMPORTANTE: No pedimos más música a Python hasta que la T2 confirme
-      uint32_t t_hshake = millis();
-      while (true) {
-        if (Serial2.available() > 0) {
-          if (Serial2.read() == ACK_SIGNAL) { 
-            break; // La Tarjeta 2 ya terminó de procesar/reproducir
-          }
-        }
-        // Si la Tarjeta 2 no responde en 200ms, seguimos para no trabar el sistema
-        if (millis() - t_hshake > 200) break; 
-        yield();
-      }
       
-      
-      */
-
-    
       // --- LIMPIEZA Y REPETICIÓN ---
       // No necesitamos Serial.write('K') porque el nuevo 'G' al inicio del loop
       // es el que le sirve a Python como confirmación de "Dame más".
@@ -256,12 +247,30 @@ void quickSort(component arr[], int low, int high) {
 }
 
 
-
-
 void sendFftBlock() {
-    Serial2.write(HEADER);
-    Serial2.write((uint8_t*)vReal, N_FFT * sizeof(float)); 
-    Serial2.write((uint8_t*)vImag, N_FFT * sizeof(float));
-    Serial2.write(FOOTER);
-    Serial2.flush(); // Asegura que los bytes salieron físicamente del chip
+    // 1. Limpiar el buffer de transmisión para asegurar que el padding sea 0
+    memset(dma_tx_buf, 0, SPI_BUFFER_SIZE);
+
+    // 2. Insertar Marcador de Inicio (Header)
+    dma_tx_buf[0] = HEADER;
+
+    // 3. Copiar vReal (256 * 4 bytes = 1024 bytes)
+    // Destino: dma_tx_buf + 1
+    memcpy(&dma_tx_buf[1], vReal, sizeof(vReal));
+
+    // 4. Copiar vImag (256 * 4 bytes = 1024 bytes)
+    // Destino: dma_tx_buf + 1 (header) + 1024 (vReal)
+    memcpy(&dma_tx_buf[1 + sizeof(vReal)], vImag, sizeof(vImag));
+
+    // 5. Insertar Marcador de Fin (Footer)
+    // Posición: 1 + 1024 + 1024 = 2049
+    dma_tx_buf[1 + sizeof(vReal) + sizeof(vImag)] = FOOTER;
+
+    // 6. El resto del buffer (2050 a 2055) se queda como 0 (Padding)
+    // Esto incluye los 4 bytes que el esclavo "perderá" por el bug del driver
+
+    // 7. Iniciar transferencia DMA (Bloqueante en este caso)
+    // Enviamos los 2056 bytes completos
+    master.transfer(dma_tx_buf, dma_rx_buf, SPI_BUFFER_SIZE);
+    delay(32);
 }
