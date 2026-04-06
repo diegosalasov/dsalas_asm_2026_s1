@@ -8,7 +8,7 @@
 #define FOOTER 0x55           // Marcador de fin de trama
 #define SAMPLE_PERIOD 125     // Periodo de muestreo en microsegundos (para 8000 Hz)
 #define BAUD_RATE_PC 1000000       // Velocidad de comunicación serial (puede ajustarse según estabilidad)
-#define SERIAL_2_BAUD 115200
+#define SERIAL_2_BAUD 250000
 
 /* --- CONSTANTES DE CONTROL --- */
 #define ACK_SIGNAL 'K'   // Señal de ACK para la comunicación entre tarjetas (puedes cambiarla si quieres)
@@ -29,10 +29,14 @@ float vReal[N_FFT];
 float vImag[N_FFT];
 ArduinoFFT<float> FFT = ArduinoFFT<float>(vReal, vImag, N_FFT, 8000);
 
-struct FrequencyGroup {
-    uint16_t index;     // Índice 'k' de la FFT
-    float energy;      // Energía del par (k y N-k)
+
+struct component {
+  float energy;
+  uint16_t index;
+  bool conservate;
 };
+
+
 
 void setup() {
   // Aumentamos el buffer de hardware de la UART para evitar desbordamientos
@@ -97,10 +101,25 @@ void loop() {
       FFT.compute(FFT_FORWARD);
       
       // Aquí podrías aplicar la compresión si la descomentas:
-      // applyEnergyBasedCompression(vReal, vImag, N_FFT, 0.95);
+      compressFft(N, 0.95); 
 
+      // 2. Transformada Inversa: Frecuencia -> Tiempo
+      FFT.compute(FFT_REVERSE);
 
-      
+      // 3. Reproducción por el DAC
+      // Recorremos los 256 valores reconstruidos
+      for (int i = 0; i < N_FFT; i++) {
+        uint32_t t_inicio = micros();
+        
+        // El resultado de la IFFT puede tener valores fuera de 0-255
+        // Hacemos un cast simple, pero si escuchas ruido, podrías normalizarlo
+        dacWrite(25, (uint8_t)vReal[i]);
+        
+        // Mantener el sample rate de 8000Hz (125 microsegundos por muestra)
+        while ((micros() - t_inicio) < SAMPLE_PERIOD);
+      }
+
+      /*
       // --- COMUNICACIÓN CON TARJETA 2 ---
       sendFftBlock(); // Envía los floats procesados a la otra tarjeta
 
@@ -117,7 +136,11 @@ void loop() {
         if (millis() - t_hshake > 200) break; 
         yield();
       }
+      
+      
+      */
 
+    
       // --- LIMPIEZA Y REPETICIÓN ---
       // No necesitamos Serial.write('K') porque el nuevo 'G' al inicio del loop
       // es el que le sirve a Python como confirmación de "Dame más".
@@ -135,67 +158,105 @@ void loop() {
 }
 
 
-/**
- * Aplica compresión basada en la importancia energética de los componentes.
- * Basado en el algoritmo de preservación de energía de tu script de Python.
- */
-void applyEnergyBasedCompression(double *vReal, double *vImag, uint16_t samples, double target_ratio) {
-    uint16_t half_count = samples / 2;
-    FrequencyGroup groups[half_count + 1];
-    double total_energy = 0;
+void compressFft(uint16_t samples, float target_ratio) {
+  float total_energy = 0.0;
+  uint16_t nyquist_idx = samples / 2; // 128
 
-    // 1. Agrupar coeficientes y calcular energía total
-    // Tratamos DC (0) y Nyquist (half_count) por separado, el resto en pares.
-    for (uint16_t k = 0; k <= half_count; k++) {
-        groups[k].index = k;
-        if (k == 0 || k == half_count) {
-            groups[k].energy = (vReal[k] * vReal[k]) + (vImag[k] * vImag[k]);
-        } else {
-            // Energía del par conjugado k y N-k
-            double e_k = (vReal[k] * vReal[k]) + (vImag[k] * vImag[k]);
-            double e_nk = (vReal[samples - k] * vReal[samples - k]) + (vImag[samples - k] * vImag[samples - k]);
-            groups[k].energy = e_k + e_nk;
+  float dc_energy = vReal[0] * vReal[0] + vImag[0] * vImag[0];
+  float nyquist_energy = vReal[nyquist_idx] * vReal[nyquist_idx] + vImag[nyquist_idx] * vImag[nyquist_idx];
+
+  // total_energy += dc_energy; // DC component
+  // total_energy += nyquist_energy; // Nyquist component
+
+  component component_witout_conjugate[129]; // Solo necesitamos la mitad de los componentes (sin conjugados)
+
+  component_witout_conjugate[0] = {dc_energy, 0, true}; // DC siempre se conserva
+  component_witout_conjugate[nyquist_idx] = {nyquist_energy, nyquist_idx, true}; // Nyquist también se conserva
+
+  for (int i = 1; i < samples/2; i++) {
+    total_energy += (vReal[i] * vReal[i] + vImag[i] * vImag[i]) * 2; // Contamos la energía de ambos componentes conjugados
+    component_witout_conjugate[i].energy = (vReal[i] * vReal[i] + vImag[i] * vImag[i]) * 2; // Energía total de ambos componentes
+    component_witout_conjugate[i].index = i;
+    component_witout_conjugate[i].conservate = false; // Inicialmente no se conservan
+  }
+
+  quickSort(component_witout_conjugate, 1, nyquist_idx - 1); // Ordenamos por energía
+
+
+  float energy_sum = 0.0;
+  for (int i = 1; i <= nyquist_idx; i++) {
+    energy_sum += component_witout_conjugate[i].energy;
+    component_witout_conjugate[i].conservate = true; // Marcar para conservar
+    if ((energy_sum / total_energy) >= target_ratio) {
+      break; // Ya alcanzamos el ratio deseado
+    }
+  }
+
+  // Recorremos TODO el array de componentes
+  for (int i = 0; i <= nyquist_idx; i++) {
+      // Si este componente NO fue marcado para conservar...
+      if (!component_witout_conjugate[i].conservate) {
+          int idx = component_witout_conjugate[i].index;
+          // 1. Borramos el componente original
+          vReal[idx] = 0.0;
+          vImag[idx] = 0.0;
+          
+          // 2. Borramos la pareja conjugada SOLO si existe (no para DC o Nyquist)
+          // El DC es idx=0 y Nyquist es idx=128
+          if (idx > 0 && idx < nyquist_idx) {
+              vReal[samples - idx] = 0.0;
+              vImag[samples - idx] = 0.0;
+          }
+      }
+  }
+
+}
+
+
+
+// Función para intercambiar dos elementos
+void swap(component* a, component* b) {
+    component t = *a; // Copia la estructura completa (energy + index + conservate)
+    *a = *b;
+    *b = t;
+}
+
+int partition(component arr[], int low, int high) {
+    // Seleccionamos el último elemento como pivote
+    int pivot = arr[high].energy;
+
+    // Índice del elemento más pequeño
+    int i = (low - 1);
+
+    for (int j = low; j <= high - 1; j++) {
+        // Si el elemento actual es menor o igual al pivote
+        if (arr[j].energy > pivot) {
+            i++;
+            swap(&arr[i], &arr[j]);
         }
-        total_energy += groups[k].energy;
     }
 
-    // 2. Ordenar grupos por energía (Descendente - Selection Sort)
-    for (uint16_t i = 0; i <= half_count; i++) {
-        uint16_t max_idx = i;
-        for (uint16_t j = i + 1; j <= half_count; j++) {
-            if (groups[j].energy > groups[max_idx].energy) max_idx = j;
-        }
-        FrequencyGroup temp = groups[i];
-        groups[i] = groups[max_idx];
-        groups[max_idx] = temp;
-    }
+    // Ponemos el pivote en su posición correcta
+    swap(&arr[i + 1], &arr[high]);
 
-    // 3. Identificar componentes necesarios para alcanzar el target_ratio
-    double cumulative_energy = 0;
-    uint16_t components_to_keep = 0;
-    double energy_threshold = total_energy * target_ratio;
+    // Retornamos el punto de partición
+    return (i + 1);
+}
 
-    bool mask[half_count + 1] = {false}; // Máscara para saber qué índices conservar
+void quickSort(component arr[], int low, int high) {
+    // Caso base: mientras el índice inicial sea menor al final
+    if (low < high) {
+        // pi es el índice de partición, arr[pi] ya está en su lugar
+        int pi = partition(arr, low, high);
 
-    for (uint16_t i = 0; i <= half_count; i++) {
-        cumulative_energy += groups[i].energy;
-        mask[groups[i].index] = true;
-        components_to_keep++;
-        if (cumulative_energy >= energy_threshold) break;
-    }
-
-    // 4. Comprimir: Poner a cero lo que no está en la máscara
-    for (uint16_t k = 0; k <= half_count; k++) {
-        if (!mask[k]) {
-            vReal[k] = 0;
-            vImag[k] = 0;
-            if (k > 0 && k < half_count) {
-                vReal[samples - k] = 0;
-                vImag[samples - k] = 0;
-            }
-        }
+        // Ordenamos recursivamente antes y después de la partición
+        quickSort(arr, low, pi - 1);
+        quickSort(arr, pi + 1, high);
     }
 }
+
+
+
 
 void sendFftBlock() {
     Serial2.write(HEADER);

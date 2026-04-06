@@ -6,7 +6,7 @@
 #define FOOTER 0x55
 #define SAMPLE_PERIOD 125 // 8000 Hz -> 1/8000 = 125us
 #define ACK_SIGNAL 'K'
-#define SERIAL_2_BAUD 115200
+#define SERIAL_2_BAUD 250000
 
 // Buffers para la IFFT
 float vReal[N_FFT];
@@ -60,3 +60,4 @@ void loop() {
     }
   }
 }
+
