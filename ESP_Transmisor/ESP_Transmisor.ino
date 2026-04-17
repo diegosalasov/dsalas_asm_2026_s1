@@ -18,6 +18,7 @@
 #define START 'S'        // Señal para iniciar la sincronización con Python
 #define ACKNOWLEDGE 'A'  // Señal para indicar que la sincronización fue exitosa
 
+
 /* --- VARIABLES GLOBALES --- */
 uint8_t buffer[N];            // Almacena temporalmente los datos de una trama
 uint8_t FFT_buffer[N_FFT];    // Buffer acumulador para procesamiento de 512 muestras
@@ -25,7 +26,7 @@ int block_counter = 0;        // Contador de bloques N recibidos
 bool _setup_done = false;     // Bandera de setup: el setup consiste enviar todos los datos 
                               // al receptor 2 para calcular las metricas previo a iniciar reproduccion
 
-
+     
 
 /* --- VARIABLES FFT --- */
 float vReal[N_FFT];
@@ -39,13 +40,14 @@ struct component {
   bool conservate;
 };
 
-
 // --- Definición de Pines SPI (VSPI nativo)---
 #define SPI_MISO      19
 #define SPI_MOSI      23
 #define SPI_SCLK      18
-#define SPI_CS_1      32
-#define SPI_CS_2      33
+#define SPI_CS_1      5
+#define SPI_CS_2      5
+#define SPEAKER_AVAIBLE 26
+
 
 // --- Definición de Pines para leds ---
 #define LED_1 25
@@ -57,7 +59,7 @@ struct component {
 #define SPI_BUFFER_SIZE  2056
 
 /// --- Configuración del SPI ---
-#define SPI_FREQUENCY 8000000 // 8 MHz, puedes ajustar según estabilidad
+#define SPI_FREQUENCY 5000000 // 8 MHz, puedes ajustar según estabilidad
 // (256 * 4) + (256 * 4) + 1 (Header) + 1 (Footer) + 4 bytes (bug) = 2054 
 #define SPI_BUFFER_SIZE  2056
 
@@ -88,6 +90,8 @@ void setup() {
 
   pinMode(LED_1, OUTPUT);
   pinMode(LED_2, OUTPUT);
+
+  pinMode(SPEAKER_AVAIBLE, INPUT_PULLDOWN);
 
   digitalWrite(LED_1, HIGH);
   digitalWrite(LED_2, HIGH);
@@ -143,6 +147,7 @@ void loop() {
         vImag[i] = 0.0;
       }
 
+      
       if (_setup_done) {// ETAPA REPRODUCCION: Reproduccion de audio en receptor 1
         // --- PROCESAMIENTO MATEMÁTICO ---
         FFT.compute(FFT_FORWARD);
@@ -154,7 +159,7 @@ void loop() {
         sendBlock(SPI_CS_1, HEADER_A);
       } else {          // ETAPA SETUP: Calculo de metricas en receptor 2
         // Enviar onda original
-        sendBlock(SPI_CS_2, HEADER_B);
+        //sendBlock(SPI_CS_2, HEADER_B);
 
         // --- PROCESAMIENTO MATEMÁTICO ---
         FFT.compute(FFT_FORWARD);
@@ -162,8 +167,16 @@ void loop() {
         // --- APLICAR COMPRESION ---
         compressFft(N, 0.95);
 
+        // --- Esperar hasta que el esclavo esté disponible ---
+
+        while (digitalRead(SPEAKER_AVAIBLE) == LOW) {
+            delayMicroseconds(1); 
+        }
+
+        // Una vez que el pin es HIGH, el código continúa hacia abajo
         // Enviar FFT comprimida
         sendBlock(SPI_CS_2, HEADER_A);
+
       }
 
       // --- LIMPIEZA Y REPETICIÓN ---
@@ -311,7 +324,6 @@ void sendBlock(int CS, int header){
   // 8. Iniciar transferencia DMA (Bloqueante en este caso)
   // Enviamos los 2056 bytes completos
   master.transfer(dma_tx_buf, dma_rx_buf, SPI_BUFFER_SIZE);
-  delay(32);
 
   // 9. Configurar seleccion de slave para detener comunicacion
   digitalWrite(CS, HIGH);
