@@ -330,13 +330,13 @@ void sendBlock(int CS, int header){
   digitalWrite(led, LOW);
 }
 
-/*
-void sendFftBlock() {
+
+void sendfftBlock() {
     // 1. Limpiar el buffer de transmisión para asegurar que el padding sea 0
     memset(dma_tx_buf, 0, SPI_BUFFER_SIZE);
 
     // 2. Insertar Marcador de Inicio (Header)
-    dma_tx_buf[0] = HEADER;
+    dma_tx_buf[0] = HEADER_A;
 
     // 3. Copiar vReal (256 * 4 bytes = 1024 bytes)
     // Destino: dma_tx_buf + 1

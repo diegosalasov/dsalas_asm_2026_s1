@@ -6,6 +6,7 @@ import librosa
 # --- CONFIGURACIÓN ---
 N = 256  # Tamaño de los datos
 PUERTO = 'COM12'
+PUERTO = 'COM12'
 BAUD = 1000000
 SAMPLERATE = 8000
 HEADER = 0xAA
@@ -17,6 +18,8 @@ ACKNOWLEDGE = b'A' # Orden del ESP32 para indicar que el bloque fue recibido cor
 START = b'S' # Orden del PC para iniciar la sincronización
 ERROR = b'E' # Orden del ESP32 para indicar que hubo un error en la trama
 OK = b'K' # Orden del ESP32 para indicar que la trama fue recibida correctamente
+STAGE_1 = b'1'# Orden del PC para indicar que se va a enviar la etapa 1 (Metricas)
+STAGE_2 = b'2' # Orden del PC para indicar que se va a enviar la etapa 2 (Reproducción)
 STAGE_1 = b'1'# Orden del PC para indicar que se va a enviar la etapa 1 (Metricas)
 STAGE_2 = b'2' # Orden del PC para indicar que se va a enviar la etapa 2 (Reproducción)
 
@@ -40,6 +43,24 @@ def transmitir(muestras, tam_bloque):
 
     total = len(muestras)
     num_bloques = int(np.ceil(total / tam_bloque))
+
+
+    print("Enviando etapa 1...\n")
+    ser.write(STAGE_1)
+    sendblock(0, num_bloques, muestras, tam_bloque, ser)
+
+    time.sleep(1)  # Pequeña pausa entre etapas
+
+    ser.write(STAGE_2)
+    print("Enviando etapa 2...\n")
+    sendblock(0, num_bloques, muestras, tam_bloque, ser)
+    
+
+    ser.close()
+    print("\n\nTransmisión finalizada con éxito.")
+
+
+def sendblock(i, num_bloques, muestras, tam_bloque, ser):
 
 
     print("Enviando etapa 1...\n")
@@ -87,6 +108,7 @@ def sendblock(i, num_bloques, muestras, tam_bloque, ser):
         else:
             # Si llega cualquier otra cosa (ruido), simplemente seguimos esperando un 'G'
             continue
+    return
     return
 
 # Carga el archivo con una frecuencia de muestreo específica (8000Hz)
