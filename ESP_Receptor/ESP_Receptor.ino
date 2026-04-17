@@ -44,7 +44,7 @@ LiquidCrystal lcd(RS,E,DB4,DB5,DB6,DB7);
 bool state[] = {false, false};
 bool _lcd_init = false;
 
-int samples = 0;
+int samples = N_FFT;
 float signal_diff2 = 0.0f;
 float signal_orig2 = 0.0f;
 float signal_new2  = 0.0f;
@@ -121,9 +121,8 @@ void loop() {
 }
 
 void updateMetrics () {
-    // 1. Aumentar cantidad de samples recibidos para calculo de metricas
-    // cada comunicacion de SPI aporta 256 samples por bloque (onda+FFT)
-    samples += N_FFT;
+    // 1. Recacular metricas para la cantidad de muestras recibidas
+    // cada bloque aporta 256 muestras
 
     // 2. Procesar datos de ambas ondas
     float so, sn, diff;
@@ -141,12 +140,17 @@ void updateMetrics () {
     }
 
     // 3. Actualizar ambas metricas utilizando los valores acumulados de las ondas
-    MSE = signal_diff2 / samples * 1000000;         // valor escalado en 10^6
+    MSE = signal_diff2 / samples;      
     SER = 10 * log10( signal_orig2 / signal_diff2 );
     E_preserved = signal_new2 / signal_orig2 * 100; // valor escalado en 100 (porcentaje)
+    
+    // 4. Reiniciar acumuladores
+    signal_orig2 = 0.0f;
+    signal_new2  = 0.0f;
+    signal_diff2 = 0.0f;
 
-    // 4. Mostrar metricas actualizadas en la pantalla LCD
-    if (block_count%6 == 0) displayMetrics();
+    // 5. Mostrar metricas actualizadas en la pantalla LCD
+    displayMetrics();
     state[0] = false; state[1] = false; // Resetear banderas
 }
 

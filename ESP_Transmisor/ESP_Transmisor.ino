@@ -22,6 +22,8 @@
 uint8_t buffer[N];            // Almacena temporalmente los datos de una trama
 uint8_t FFT_buffer[N_FFT];    // Buffer acumulador para procesamiento de 512 muestras
 int block_counter = 0;        // Contador de bloques N recibidos
+bool _setup_done = false;     // Bandera de setup: el setup consiste enviar todos los datos 
+                              // al receptor 2 para calcular las metricas previo a iniciar reproduccion
 
 
 
@@ -130,47 +132,55 @@ void loop() {
 
   // 3. PROCESAR LA TRAMA RECIBIDA
   if (Serial.read() == HEADER_A) {
-    
     // Leer los datos de audio
     Serial.readBytes(buffer, N);
     
     // Verificar que el cierre de trama sea correcto
     if (Serial.read() == FOOTER) {
-      
       // Llenar buffer para FFT
       for (int i = 0; i < N; i++) {
         vReal[i] = (float)buffer[i];
         vImag[i] = 0.0;
       }
 
-      // Enviar onda original al receptor 2
-      sendBlock(SPI_CS_2, HEADER_B);
-
-      // --- PROCESAMIENTO MATEMÁTICO ---
-      FFT.compute(FFT_FORWARD);
+      if (_setup_done) {// ETAPA REPRODUCCION: Reproduccion de audio en receptor 1
+        // --- PROCESAMIENTO MATEMÁTICO ---
+        FFT.compute(FFT_FORWARD);
       
-      // --- APLICAR COMPRESION ---
-      compressFft(N, 1); 
+        // --- APLICAR COMPRESION ---
+        compressFft(N, 1); 
 
-      // Enviar FFT comprimida a ambos receptores
-      sendBlock(SPI_CS_1, HEADER_A);
-      sendBlock(SPI_CS_2, HEADER_A);
+        // Enviar FFT comprimida
+        sendBlock(SPI_CS_1, HEADER_A);
+      } else {          // ETAPA SETUP: Calculo de metricas en receptor 2
+        // Enviar onda original
+        sendBlock(SPI_CS_2, HEADER_B);
 
+        // --- PROCESAMIENTO MATEMÁTICO ---
+        FFT.compute(FFT_FORWARD);
       
+        // --- APLICAR COMPRESION ---
+        compressFft(N, 0.95);
+
+        // Enviar FFT comprimida
+        sendBlock(SPI_CS_2, HEADER_A);
+      }
+
       // --- LIMPIEZA Y REPETICIÓN ---
       // No necesitamos Serial.write('K') porque el nuevo 'G' al inicio del loop
       // es el que le sirve a Python como confirmación de "Dame más".
       block_counter = 0; 
-
     } else {
       // Si el footer falló, enviamos 'E' y el loop vuelve a pedir el bloque con 'G'
       Serial.write(ERROR);
       while(Serial.available()) Serial.read(); // Limpiar basura
     }
+
   } else {
     // Si el byte inicial no era HEADER, limpiar hasta encontrar uno o pedir de nuevo
     while(Serial.available() && Serial.peek() != HEADER_A) Serial.read();
   }
+
 }
 
 

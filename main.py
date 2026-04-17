@@ -5,7 +5,7 @@ import librosa
 
 # --- CONFIGURACIÓN ---
 N = 256  # Tamaño de los datos
-PUERTO = 'COM9'
+PUERTO = 'COM6'
 BAUD = 1000000
 SAMPLERATE = 8000
 HEADER = 0xAA
