@@ -37,12 +37,11 @@ struct component {
   bool conservate;
 };
 
-
 // --- Definición de Pines SPI (VSPI nativo)---
 #define SPI_MISO      19
 #define SPI_MOSI      23
 #define SPI_SCLK      18
-#define SPI_CS_1      32
+#define SPI_CS_1      5
 #define SPI_CS_2      33
 
 // --- Definición de Pines para leds ---
@@ -155,6 +154,8 @@ void loop() {
       // Enviar FFT comprimida a ambos receptores
       sendBlock(SPI_CS_1, HEADER_A);
       sendBlock(SPI_CS_2, HEADER_A);
+
+      //sendfftBlock();
 
       
       // --- LIMPIEZA Y REPETICIÓN ---
@@ -308,13 +309,13 @@ void sendBlock(int CS, int header){
   digitalWrite(led, LOW);
 }
 
-/*
-void sendFftBlock() {
+
+void sendfftBlock() {
     // 1. Limpiar el buffer de transmisión para asegurar que el padding sea 0
     memset(dma_tx_buf, 0, SPI_BUFFER_SIZE);
 
     // 2. Insertar Marcador de Inicio (Header)
-    dma_tx_buf[0] = HEADER;
+    dma_tx_buf[0] = HEADER_A;
 
     // 3. Copiar vReal (256 * 4 bytes = 1024 bytes)
     // Destino: dma_tx_buf + 1
@@ -334,5 +335,4 @@ void sendFftBlock() {
     // 7. Iniciar transferencia DMA (Bloqueante en este caso)
     // Enviamos los 2056 bytes completos
     master.transfer(dma_tx_buf, dma_rx_buf, SPI_BUFFER_SIZE);
-    delay(15);
 }
