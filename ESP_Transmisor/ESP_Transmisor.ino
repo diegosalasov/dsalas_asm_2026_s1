@@ -126,7 +126,7 @@ void loop() {
       FFT.compute(FFT_FORWARD);
       
       // Aquí podrías aplicar la compresión si la descomentas:
-      compressFft(N, 1); 
+      compressFft(N, 0.95); 
 
       
       sendFftBlock(); // Envía los floats procesados a la otra tarjeta
@@ -272,5 +272,5 @@ void sendFftBlock() {
     // 7. Iniciar transferencia DMA (Bloqueante en este caso)
     // Enviamos los 2056 bytes completos
     master.transfer(dma_tx_buf, dma_rx_buf, SPI_BUFFER_SIZE);
-    delay(32);
+    delay(15);
 }

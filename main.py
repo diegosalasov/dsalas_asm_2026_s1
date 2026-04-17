@@ -4,9 +4,9 @@ import numpy as np
 import librosa
 
 # --- CONFIGURACIÓN ---
-N = 256  # Tamaño de los datos
-PUERTO = 'COM12'
-BAUD = 1000000
+N = 64  # Tamaño de los datos
+PUERTO = 'COM6'
+BAUD = 10000
 SAMPLERATE = 8000
 HEADER = 0xAA
 FOOTER = 0x55
@@ -83,7 +83,7 @@ def transmitir(muestras, tam_bloque):
 
 # Carga el archivo con una frecuencia de muestreo específica (8000Hz)
 # Librosa devuelve 'audio' como un array de floats entre -1.0 y 1.0
-audio_raw, _ = librosa.load("Audio/cancion_ele.mp3", sr=SAMPLERATE, mono=True)
+audio_raw, _ = librosa.load("Audio/dembow_mieo.mp3", sr=SAMPLERATE, mono=True)
 
 # Restamos el valor mínimo para que el punto más bajo sea exactamente 0
 # Ahora todos los valores de la canción son positivos
