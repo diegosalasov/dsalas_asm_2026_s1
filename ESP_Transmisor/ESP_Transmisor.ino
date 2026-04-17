@@ -5,7 +5,8 @@
 /* --- CONSTANTES DE COMUNICACIÓN --- */
 #define N 256                 // Tamaño de cada bloque de datos recibido
 #define N_FFT 256             // Tamaño total del buffer para procesamiento (FFT/Reproducción)
-#define HEADER 0xAA           // Marcador de inicio de trama
+#define HEADER_A 0xAA         // Marcador de inicio de trama (serial / bloques FFT)
+#define HEADER_B 0xAB         // Marcador de inicio de trama (bloques onda)
 #define FOOTER 0x55           // Marcador de fin de trama
 #define SAMPLE_PERIOD 125     // Periodo de muestreo en microsegundos (para 8000 Hz)
 #define BAUD_RATE_PC 1000000       // Velocidad de comunicación serial (puede ajustarse según estabilidad
@@ -37,11 +38,16 @@ struct component {
 };
 
 
-// --- Definición de Pines SPI (VSPI Nativo) ---
-#define VSPI_MISO      19
-#define VSPI_MOSI      23
-#define VSPI_SCLK      18
-#define VSPI_SS        5
+// --- Definición de Pines SPI (VSPI nativo)---
+#define SPI_MISO      19
+#define SPI_MOSI      23
+#define SPI_SCLK      18
+#define SPI_CS_1      32
+#define SPI_CS_2      33
+
+// --- Definición de Pines para leds ---
+#define LED_1 25
+#define LED_2 26
 
 // 2056 bytes garantiza:
 // 1. Alineación de 4 bytes para el DMA.
@@ -69,8 +75,20 @@ void setup() {
   master.setDataMode(SPI_MODE0);
   master.setFrequency(1000000);       
   master.setMaxTransferSize(SPI_BUFFER_SIZE); 
-  master.begin(VSPI_HOST, VSPI_SCLK, VSPI_MISO, VSPI_MOSI, VSPI_SS);
+  master.begin(VSPI_HOST, SPI_SCLK, SPI_MISO, SPI_MOSI, -1);
 
+  // Configuracion de pines
+  pinMode(SPI_CS_1, OUTPUT);
+  pinMode(SPI_CS_2, OUTPUT);
+
+  digitalWrite(SPI_CS_1, HIGH);
+  digitalWrite(SPI_CS_2, HIGH);
+
+  pinMode(LED_1, OUTPUT);
+  pinMode(LED_2, OUTPUT);
+
+  digitalWrite(LED_1, HIGH);
+  digitalWrite(LED_2, HIGH);
 
   // Aumentamos el buffer de hardware de la UART para evitar desbordamientos
   Serial.setRxBufferSize(2048); 
@@ -85,6 +103,9 @@ void setup() {
       break;
     }
   }
+
+  digitalWrite(LED_1, LOW);
+  digitalWrite(LED_2, LOW);
 }
 
 void loop() {
@@ -108,7 +129,7 @@ void loop() {
   }
 
   // 3. PROCESAR LA TRAMA RECIBIDA
-  if (Serial.read() == HEADER) {
+  if (Serial.read() == HEADER_A) {
     
     // Leer los datos de audio
     Serial.readBytes(buffer, N);
@@ -122,14 +143,18 @@ void loop() {
         vImag[i] = 0.0;
       }
 
+      // Enviar onda original al receptor 2
+      sendBlock(SPI_CS_2, HEADER_B);
+
       // --- PROCESAMIENTO MATEMÁTICO ---
       FFT.compute(FFT_FORWARD);
       
       // Aquí podrías aplicar la compresión si la descomentas:
       compressFft(N, 0.95); 
 
-      
-      sendFftBlock(); // Envía los floats procesados a la otra tarjeta
+      // Enviar FFT comprimida a ambos receptores
+      sendBlock(SPI_CS_1, HEADER_A);
+      sendBlock(SPI_CS_2, HEADER_A);
 
       
       // --- LIMPIEZA Y REPETICIÓN ---
@@ -144,7 +169,7 @@ void loop() {
     }
   } else {
     // Si el byte inicial no era HEADER, limpiar hasta encontrar uno o pedir de nuevo
-    while(Serial.available() && Serial.peek() != HEADER) Serial.read();
+    while(Serial.available() && Serial.peek() != HEADER_A) Serial.read();
   }
 }
 
@@ -246,7 +271,44 @@ void quickSort(component arr[], int low, int high) {
     }
 }
 
+void sendBlock(int CS, int header){
+  int led = LED_1;
+  if (CS == SPI_CS_2) led = LED_2;
+  // 1. Configurar seleccion de slave para iniciar comunicacion
+  digitalWrite(led, HIGH);
+  digitalWrite(CS, LOW);
+  // 2. Limpiar el buffer de transmisión para asegurar que el padding sea 0
+  memset(dma_tx_buf, 0, SPI_BUFFER_SIZE);
 
+  // 3. Insertar Marcador de Inicio (Header)
+  dma_tx_buf[0] = header;
+
+  // 4. Copiar vReal (256 * 4 bytes = 1024 bytes)
+  // Destino: dma_tx_buf + 1
+  memcpy(&dma_tx_buf[1], vReal, sizeof(vReal));
+
+  // 5. Copiar vImag (256 * 4 bytes = 1024 bytes)
+  // Destino: dma_tx_buf + 1 (header) + 1024 (vReal)
+  memcpy(&dma_tx_buf[1 + sizeof(vReal)], vImag, sizeof(vImag));
+
+  // 6. Insertar Marcador de Fin (Footer)
+  // Posición: 1 + 1024 + 1024 = 2049
+  dma_tx_buf[1 + sizeof(vReal) + sizeof(vImag)] = FOOTER;
+
+  // 7. El resto del buffer (2050 a 2055) se queda como 0 (Padding)
+  // Esto incluye los 4 bytes que el esclavo "perderá" por el bug del driver
+
+  // 8. Iniciar transferencia DMA (Bloqueante en este caso)
+  // Enviamos los 2056 bytes completos
+  master.transfer(dma_tx_buf, dma_rx_buf, SPI_BUFFER_SIZE);
+  delay(32);
+
+  // 9. Configurar seleccion de slave para detener comunicacion
+  digitalWrite(CS, HIGH);
+  digitalWrite(led, LOW);
+}
+
+/*
 void sendFftBlock() {
     // 1. Limpiar el buffer de transmisión para asegurar que el padding sea 0
     memset(dma_tx_buf, 0, SPI_BUFFER_SIZE);

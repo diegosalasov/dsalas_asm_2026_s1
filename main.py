@@ -4,9 +4,15 @@ import numpy as np
 import librosa
 
 # --- CONFIGURACIÓN ---
+<<<<<<< HEAD
 N = 64  # Tamaño de los datos
 PUERTO = 'COM6'
 BAUD = 10000
+=======
+N = 256  # Tamaño de los datos
+PUERTO = 'COM9'
+BAUD = 1000000
+>>>>>>> origin/part4_fft_metrics
 SAMPLERATE = 8000
 HEADER = 0xAA
 FOOTER = 0x55
