@@ -13,6 +13,7 @@
 #define VSPI_MOSI      23
 #define VSPI_SCLK      18
 #define VSPI_SS        5
+#define SPEAKER_AVAIBLE 26
 
 // Cálculo del Buffer: 2050 datos + 2 alineación + 4 compensación bug = 2056
 #define SPI_BUFFER_SIZE 2056
@@ -32,6 +33,12 @@ void setup() {
 
     // Pin 25 es el DAC1 interno del ESP32
     pinMode(25, OUTPUT); 
+
+    // Configura el pin como salida
+    pinMode(SPEAKER_AVAIBLE, OUTPUT);
+  
+    // Lo inicializamos en BAJO (0 voltios) para que no haya señales falsas al arrancar
+    digitalWrite(SPEAKER_AVAIBLE, HIGH);
 
     // --- Configuración de Buffers DMA ---
     dma_tx_buf = slave.allocDMABuffer(SPI_BUFFER_SIZE);
@@ -55,6 +62,7 @@ void setup() {
 }
 
 void loop() {
+    Serial.println(digitalRead(SPEAKER_AVAIBLE));
     // 1. Esperar y recibir la transferencia por DMA
     // Esta función bloquea hasta que el Maestro completa el envío de SPI_BUFFER_SIZE bytes
     uint32_t received_bytes = slave.transfer(dma_tx_buf, dma_rx_buf, SPI_BUFFER_SIZE);
@@ -64,6 +72,8 @@ void loop() {
         // El footer está en el índice 2049 (1 + 1024 + 1024)
         if (dma_rx_buf[0] == HEADER && dma_rx_buf[1 + sizeof(vReal) + sizeof(vImag)] == FOOTER) {
             
+            digitalWrite(SPEAKER_AVAIBLE, LOW);
+
             // 3. Desempaquetar los floats del buffer DMA a los arrays de la FFT
             memcpy(vReal, &dma_rx_buf[1], sizeof(vReal));
             memcpy(vImag, &dma_rx_buf[1 + sizeof(vReal)], sizeof(vImag));
@@ -71,8 +81,10 @@ void loop() {
             // 4. Procesamiento: Transformada Inversa (Frecuencia -> Tiempo)
             FFT.compute(FFT_REVERSE);
 
+            
             // 5. Reproducción por el DAC
             for (int i = 0; i < N_FFT; i++) {
+
                 uint32_t t_inicio = micros();
                 
                 // Aplicamos constrain para asegurar que el valor esté en rango DAC (0-255)
@@ -81,6 +93,9 @@ void loop() {
                 // Mantener el sample rate de 8000Hz
                 while ((micros() - t_inicio) < SAMPLE_PERIOD);
             }
+            digitalWrite(SPEAKER_AVAIBLE, HIGH);
+
+            
             
         } else {
             // En caso de error de sincronía, limpiamos el buffer RX

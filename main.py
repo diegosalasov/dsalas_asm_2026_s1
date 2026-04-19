@@ -5,7 +5,8 @@ import librosa
 
 # --- CONFIGURACIÓN ---
 N = 256  # Tamaño de los datos
-PUERTO = 'COM6'
+PUERTO = 'COM12'
+PUERTO = 'COM12'
 BAUD = 1000000
 SAMPLERATE = 8000
 HEADER = 0xAA
@@ -17,8 +18,10 @@ ACKNOWLEDGE = b'A' # Orden del ESP32 para indicar que el bloque fue recibido cor
 START = b'S' # Orden del PC para iniciar la sincronización
 ERROR = b'E' # Orden del ESP32 para indicar que hubo un error en la trama
 OK = b'K' # Orden del ESP32 para indicar que la trama fue recibida correctamente
-
-
+STAGE_1 = b'1'# Orden del PC para indicar que se va a enviar la etapa 1 (Metricas)
+STAGE_2 = b'2' # Orden del PC para indicar que se va a enviar la etapa 2 (Reproducción)
+STAGE_1 = b'1'# Orden del PC para indicar que se va a enviar la etapa 1 (Metricas)
+STAGE_2 = b'2' # Orden del PC para indicar que se va a enviar la etapa 2 (Reproducción)
 
 
 def transmitir(muestras, tam_bloque):
@@ -40,8 +43,42 @@ def transmitir(muestras, tam_bloque):
 
     total = len(muestras)
     num_bloques = int(np.ceil(total / tam_bloque))
+
+
+    print("Enviando etapa 1...\n")
+    ser.write(STAGE_1)
+    sendblock(0, num_bloques, muestras, tam_bloque, ser)
+
+    time.sleep(1)  # Pequeña pausa entre etapas
+
+    ser.write(STAGE_2)
+    print("Enviando etapa 2...\n")
+    sendblock(0, num_bloques, muestras, tam_bloque, ser)
     
-    i = 0
+
+    ser.close()
+    print("\n\nTransmisión finalizada con éxito.")
+
+
+def sendblock(i, num_bloques, muestras, tam_bloque, ser):
+
+
+    print("Enviando etapa 1...\n")
+    ser.write(STAGE_1)
+    sendblock(0, num_bloques, muestras, tam_bloque, ser)
+
+    time.sleep(1)  # Pequeña pausa entre etapas
+
+    ser.write(STAGE_2)
+    print("Enviando etapa 2...\n")
+    sendblock(0, num_bloques, muestras, tam_bloque, ser)
+    
+
+    ser.close()
+    print("\n\nTransmisión finalizada con éxito.")
+
+
+def sendblock(i, num_bloques, muestras, tam_bloque, ser):
     while i < num_bloques:
         # 1. ESPERAR LA ORDEN 'G' (DAME BLOQUE) DEL ESP32
         # El script se detiene aquí hasta que la Tarjeta 1 esté lista
@@ -68,22 +105,15 @@ def transmitir(muestras, tam_bloque):
                 print(f"Enviando bloque {i}/{num_bloques} - Progreso: {(i/num_bloques)*100:.1f}%", end='\r')
             
             i += 1 # Avanzar al siguiente bloque solo después de enviarlo
-        
-        elif orden == ERROR:
-            # Si el ESP32 detectó un error en la trama anterior, lo notificamos
-            # Opcional: Podrías NO incrementar 'i' para que se reintente el mismo bloque
-            print(f"\n[!] El ESP32 reportó error de sincronía en el bloque {i-1}")
-        
         else:
             # Si llega cualquier otra cosa (ruido), simplemente seguimos esperando un 'G'
             continue
-
-    ser.close()
-    print("\n\nTransmisión finalizada con éxito.")
+    return
+    return
 
 # Carga el archivo con una frecuencia de muestreo específica (8000Hz)
 # Librosa devuelve 'audio' como un array de floats entre -1.0 y 1.0
-audio_raw, _ = librosa.load("Audio/cancion_ele.mp3", sr=SAMPLERATE, mono=True)
+audio_raw, _ = librosa.load("Audio/dembow_mieo.mp3", sr=SAMPLERATE, mono=True)
 
 # Restamos el valor mínimo para que el punto más bajo sea exactamente 0
 # Ahora todos los valores de la canción son positivos
