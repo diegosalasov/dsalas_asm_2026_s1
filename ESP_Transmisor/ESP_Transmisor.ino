@@ -59,9 +59,10 @@ struct component {
 #define SPI_BUFFER_SIZE  2056
 
 /// --- Configuración del SPI ---
-#define SPI_FREQUENCY 5000000 // 8 MHz, puedes ajustar según estabilidad
+#define SPI_FREQUENCY 10000000 // 8 MHz, puedes ajustar según estabilidad
 // (256 * 4) + (256 * 4) + 1 (Header) + 1 (Footer) + 4 bytes (bug) = 2054 
 #define SPI_BUFFER_SIZE  2056
+
 
 // --- Recursos DMA ---
 uint8_t *dma_tx_buf;
@@ -330,7 +331,7 @@ void sendBlock(int CS, int header){
   digitalWrite(led, LOW);
 }
 
-
+/*
 void sendfftBlock() {
     // 1. Limpiar el buffer de transmisión para asegurar que el padding sea 0
     memset(dma_tx_buf, 0, SPI_BUFFER_SIZE);
