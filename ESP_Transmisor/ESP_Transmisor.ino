@@ -181,7 +181,7 @@ void loop() {
         FFT.compute(FFT_FORWARD);
       
         // --- APLICAR COMPRESION ---
-        compressFft(N, 0.94);
+        compressFft(N, 0.99);
 
         // Enviar FFT comprimida
         sendBlock(SPI_CS_2, HEADER_A);

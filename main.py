@@ -66,7 +66,8 @@ def sendblock(i, num_bloques, muestras, tam_bloque, ser, etapa):
             # Preparar el bloque actual
             ser.write(etapa)
 
-            header : np.ndarray
+            bloque : np.ndarray
+            header = 0
             if (i == num_bloques):
                 # Padding si es el ultimo bloque (datos irrelevantes)
                 bloque = np.pad(bloque, (0, tam_bloque), 'constant', constant_values=127)
