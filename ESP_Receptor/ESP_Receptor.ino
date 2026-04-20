@@ -45,18 +45,20 @@ bool _lcd_init = false;         // estado inicial de pantalla led
 
 bool state[] = {false, false};  // estado de recepcion de bloques: [0] onda original, [1] fft
 int block_count = 0; // contador de bloques
+const int update_rate = 8; // velocidad de actualizacion de pantalla
 
 struct {
     float mse = 0.0f;   // Error cuadratico medio (MSE)
     float ser = 0.0f;   // Relacion senal a error (SER)
-    float ep  = 0.0f;   // Energia preservad
-} acc, metrics;         // Acumulados para promedios y metricas
+    float ep  = 0.0f;   // Energia preservada
+} metrics;              // Metricas
+const float prec = 1e-12; // Precision para denominador de SER
 
 struct {            
     int mse = 0;
     int ser = 0;
     int ep  = 0;
-} win;          // contadores de datos validos 
+} count;          // contadores de datos
 
 void setup() {
   // Inicializar Serial solo para depuración (opcional)
@@ -133,9 +135,8 @@ void updateMetrics () {
     int samples = N_FFT;
 
     // 2. Procesar datos de ambas ondas
-    float so, sn, diff;                     // senal original y nueva, y diferencia
-    float sorig_sqr, snew_sqr, sdiff_sqr;   // valores cuadrados
-    float pre_mse, pre_ser, pre_ep;         // metricas sin depurado
+    float so, sn, diff; // senal original y nueva, y diferencia
+    float sorig_sqr = 0.0f, snew_sqr = 0.0f, sdiff_sqr = 0.0f;   // valores cuadrados
     // --- Sumatoria para la trama de muestras recibidas ---
     for (int n = 0; n < N_FFT; n++){
         // Calcular magnitud en cada punto para contemplar pequenas variaciones en la parte imaginaria
@@ -151,42 +152,29 @@ void updateMetrics () {
     }
 
     // 3. Actualizar metricas
-    pre_mse = sdiff_sqr / samples;      
-    pre_ser = 10 * log10( sorig_sqr / sdiff_sqr );
-    pre_ep = snew_sqr / sorig_sqr * 100; // valor escalado en 100 (porcentaje)
+    float pre_mse = sdiff_sqr / samples;      
+    float pre_ser = 10 * log10( sorig_sqr / max(sdiff_sqr, prec) );
+    float pre_ep = snew_sqr / sorig_sqr * 100; // valor escalado en 100 (porcentaje)
     // --- Verificar que los datos sean validos ---
-    if (isfinite(pre_mse)){ // MSE no es NaN ni Inf
-        win.mse += 1;
-        acc.mse += pre_mse;
+    if (isfinite(pre_mse) && (pre_mse < 10*metrics.mse || metrics.mse == 0) ){ // MSE no es NaN ni Inf
+        count.mse += 1;
+        // --- Calcular promedio sobre la marcha ---
+        metrics.mse = metrics.mse + (pre_mse - metrics.mse)/count.mse;
     }
-    if (isfinite(pre_ser)){ // SER no es NaN ni Inf
-        win.ser += 1;
-        acc.ser += pre_ser;
+    if (isfinite(pre_ser) && (pre_ser < 4*metrics.ser || metrics.ser == 0) ){ // SER no es NaN ni Inf
+        count.ser += 1;
+        // --- Calcular promedio sobre la marcha ---
+        metrics.ser = metrics.ser + (pre_ser - metrics.ser)/count.ser;
     }
     if (isfinite(pre_ep)){ // EP no es NaN ni Inf
-        win.ep += 1;
-        acc.ep += pre_ep;
-    }
-    // --- Calcular promedio sobre la marcha ---
-    if (win.mse == 5) { // Se han recibido 5 muestras validas para calcular MSE
-        metrics.mse = acc.mse / win.mse;
-        win.mse = 0;
-        acc.mse = 0;
-    }
-    if (win.ser == 5) { // Se han recibido 5 muestras validas para calcular SER
-        metrics.ser = acc.ser / win.ser;
-        win.ser = 0;
-        acc.ser = 0;
-    }
-    if (win.ep == 5) { // Se han recibido 5 muestras validas para calcular EP
-        metrics.ep = acc.ep / win.ep;
-        win.ep = 0;
-        acc.ep = 0;
+        count.ep += 1;
+        // --- Calcular promedio sobre la marcha ---
+        metrics.ep = pre_ep;
     }
 
     // 4. Resetear banderas
     state[0] = false; state[1] = false;
-    if (block_count % 6 == 0) displayMetrics();
+    if (block_count % update_rate == 0) displayMetrics();
 }
 
 void displayMetrics () {
@@ -218,19 +206,19 @@ void displayMetrics () {
         lcd.setCursor(6,1);
         lcd.print("          ");
         lcd.setCursor(6,1);
-        lcd.print(metrics.mse,3);
+        lcd.print(metrics.mse, 3);
 
         // 2. Escribir valor SER
         lcd.setCursor(6,2);
         lcd.print("          ");
         lcd.setCursor(6,2);
-        lcd.print(metrics.ser,3);
+        lcd.print(metrics.ser, 3);
 
         // 3. Escribir valor EP
         lcd.setCursor(6,3);
         lcd.print("          ");
         lcd.setCursor(6,3);
-        lcd.print(metrics.ep,2);
+        lcd.print(metrics.ep, 2);
 
     }
     // (opcional) Imprimir los valores por serial

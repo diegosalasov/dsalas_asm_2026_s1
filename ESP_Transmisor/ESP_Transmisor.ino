@@ -63,7 +63,7 @@ struct component {
 #define SPI_BUFFER_SIZE  2056
 
 /// --- Configuración del SPI ---
-#define SPI_FREQUENCY 5000000 // 8 MHz, puedes ajustar según estabilidad
+#define SPI_FREQUENCY 4000000 // 8 MHz, puedes ajustar según estabilidad
 // (256 * 4) + (256 * 4) + 1 (Header) + 1 (Footer) + 4 bytes (bug) = 2054 
 #define SPI_BUFFER_SIZE  2056
 
