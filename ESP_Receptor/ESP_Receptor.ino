@@ -8,6 +8,7 @@
 #define N_FFT          256
 #define HEADER_A       0xAA     // Marcador de inicio de trama (bloque FFT)
 #define HEADER_B       0xAB     // Marcador de inicio de trama (bloque onda)
+#define HEADER_END     0xA2     // Marcador de inicio de trama (final de audio)
 #define FOOTER         0x55     // Marcador de fin de trama
 #define SAMPLE_PERIOD  125      // 8000 Hz -> 125us por muestra
 
@@ -109,6 +110,9 @@ void loop() {
         // --- Activar bandera de recepcion de un bloque onda ---
         state[0] = true;
         block_count += 1;
+    } else if (dma_rx_buf[0] == HEADER_END && dma_rx_buf[1 + sizeof(vReal) + sizeof(vImag)] == FOOTER) { // Final de audio
+        // 3, Mostrar metricas
+        
     } else {
         // En caso de error de sincronía, limpiamos el buffer RX
         memset(dma_rx_buf, 0, SPI_BUFFER_SIZE);
@@ -149,9 +153,9 @@ void updateMetrics () {
     signal_new2  = 0.0f;
     signal_diff2 = 0.0f;
 
-    // 5. Mostrar metricas actualizadas en la pantalla LCD
+    // 5. Resetear banderas
+    state[0] = false; state[1] = false;
     displayMetrics();
-    state[0] = false; state[1] = false; // Resetear banderas
 }
 
 void displayMetrics () {
