@@ -12,7 +12,7 @@
 #define VSPI_MISO      19
 #define VSPI_MOSI      23
 #define VSPI_SCLK      18
-#define VSPI_SS        5
+#define VSPI_SS        13
 #define SPEAKER_AVAIBLE 26
 
 // Cálculo del Buffer: 2050 datos + 2 alineación + 4 compensación bug = 2056
@@ -61,8 +61,11 @@ void setup() {
     Serial.println("Esclavo SPI DMA VSPI Iniciado");
 }
 
-void loop() {
+void loop() 
+{
     Serial.println(digitalRead(SPEAKER_AVAIBLE));
+    digitalWrite(SPEAKER_AVAIBLE, HIGH);
+
     // 1. Esperar y recibir la transferencia por DMA
     // Esta función bloquea hasta que el Maestro completa el envío de SPI_BUFFER_SIZE bytes
     uint32_t received_bytes = slave.transfer(dma_tx_buf, dma_rx_buf, SPI_BUFFER_SIZE);

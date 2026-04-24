@@ -5,11 +5,13 @@
 /* --- CONSTANTES DE COMUNICACIÓN --- */
 #define N 256                 // Tamaño de cada bloque de datos recibido
 #define N_FFT 256             // Tamaño total del buffer para procesamiento (FFT/Reproducción)
-#define HEADER_A 0xAA         // Marcador de inicio de trama (serial / bloques FFT)
+#define HEADER_DATA 0xA1      // Marcador de inicio de trama para bloques de datos (serial)
+#define HEADER_END  0xA2      // Marcador de inicio de trama para bloques de finalizacion (serial)
+#define HEADER_A 0xAA         // Marcador de inicio de trama (bloques FFT)
 #define HEADER_B 0xAB         // Marcador de inicio de trama (bloques onda)
 #define FOOTER 0x55           // Marcador de fin de trama
 #define SAMPLE_PERIOD 125     // Periodo de muestreo en microsegundos (para 8000 Hz)
-#define BAUD_RATE_PC 1000000       // Velocidad de comunicación serial (puede ajustarse según estabilidad
+#define BAUD_RATE_PC 1000000  // Velocidad de comunicación serial (puede ajustarse según estabilidad
 
 /* --- CONSTANTES DE CONTROL --- */
 #define ACK_SIGNAL 'K'   // Señal de ACK para la comunicación entre tarjetas (puedes cambiarla si quieres)
@@ -17,6 +19,8 @@
 #define ERROR 'E'        // Señal para indicar un error en la trama
 #define START 'S'        // Señal para iniciar la sincronización con Python
 #define ACKNOWLEDGE 'A'  // Señal para indicar que la sincronización fue exitosa
+#define STAGE_1 '1'
+#define STAGE_2 '2'
 
 
 /* --- VARIABLES GLOBALES --- */
@@ -44,14 +48,14 @@ struct component {
 #define SPI_MISO      19
 #define SPI_MOSI      23
 #define SPI_SCLK      18
-#define SPI_CS_1      5
+#define SPI_CS_1      13
 #define SPI_CS_2      5
 #define SPEAKER_AVAIBLE 26
 
 
 // --- Definición de Pines para leds ---
 #define LED_1 25
-#define LED_2 26
+#define LED_2 27
 
 // 2056 bytes garantiza:
 // 1. Alineación de 4 bytes para el DMA.
@@ -59,10 +63,9 @@ struct component {
 #define SPI_BUFFER_SIZE  2056
 
 /// --- Configuración del SPI ---
-#define SPI_FREQUENCY 10000000 // 8 MHz, puedes ajustar según estabilidad
+#define SPI_FREQUENCY 4000000 // 8 MHz, puedes ajustar según estabilidad
 // (256 * 4) + (256 * 4) + 1 (Header) + 1 (Footer) + 4 bytes (bug) = 2054 
 #define SPI_BUFFER_SIZE  2056
-
 
 // --- Recursos DMA ---
 uint8_t *dma_tx_buf;
@@ -134,9 +137,15 @@ void loop() {
     }
     yield(); 
   }
+  
+  // --- Recibir confirmacion de etapa ---
+  char stage = Serial.read();
+  if (stage == STAGE_1) _setup_done = false;
+  if (stage == STAGE_2) _setup_done = true;
 
   // 3. PROCESAR LA TRAMA RECIBIDA
-  if (Serial.read() == HEADER_A) {
+  int header = Serial.read();
+  if (header == HEADER_DATA) {  // --- Lectura de datos de audio ---
     // Leer los datos de audio
     Serial.readBytes(buffer, N);
     
@@ -148,25 +157,12 @@ void loop() {
         vImag[i] = 0.0;
       }
 
-      
-      if (_setup_done) {// ETAPA REPRODUCCION: Reproduccion de audio en receptor 1
+      if (_setup_done) {// ETAPA REPRODUCCION (2): Reproduccion de audio en receptor 1
         // --- PROCESAMIENTO MATEMÁTICO ---
         FFT.compute(FFT_FORWARD);
       
         // --- APLICAR COMPRESION ---
         compressFft(N, 1); 
-
-        // Enviar FFT comprimida
-        sendBlock(SPI_CS_1, HEADER_A);
-      } else {          // ETAPA SETUP: Calculo de metricas en receptor 2
-        // Enviar onda original
-        //sendBlock(SPI_CS_2, HEADER_B);
-
-        // --- PROCESAMIENTO MATEMÁTICO ---
-        FFT.compute(FFT_FORWARD);
-      
-        // --- APLICAR COMPRESION ---
-        compressFft(N, 0.95);
 
         // --- Esperar hasta que el esclavo esté disponible ---
 
@@ -176,8 +172,47 @@ void loop() {
 
         // Una vez que el pin es HIGH, el código continúa hacia abajo
         // Enviar FFT comprimida
-        sendBlock(SPI_CS_2, HEADER_A);
+        sendBlock(SPI_CS_1, HEADER_A);
 
+        
+      } else {          // ETAPA SETUP (1): Calculo de metricas en receptor 2
+        // Enviar onda original
+        sendBlock(SPI_CS_2, HEADER_B);
+
+        // --- PROCESAMIENTO MATEMÁTICO ---
+        FFT.compute(FFT_FORWARD);
+      
+        // --- APLICAR COMPRESION ---
+        compressFft(N, 0.99);
+
+        // Enviar FFT comprimida
+        sendBlock(SPI_CS_2, HEADER_A);
+      }
+
+      // --- LIMPIEZA Y REPETICIÓN ---
+      // No necesitamos Serial.write('K') porque el nuevo 'G' al inicio del loop
+      // es el que le sirve a Python como confirmación de "Dame más".
+      block_counter = 0; 
+    } else {
+      // Si el footer falló, enviamos 'E' y el loop vuelve a pedir el bloque con 'G'
+      Serial.write(ERROR);
+      while(Serial.available()) Serial.read(); // Limpiar basura
+    }
+
+  } else if (header == HEADER_END) {  // --- Lectura de cierre de datos de audio ---
+    // Leer los datos de audio
+    Serial.readBytes(buffer, N);
+    
+    // Verificar que el cierre de trama sea correcto
+    if (Serial.read() == FOOTER) {
+      // Llenar buffer
+      for (int i = 0; i < N; i++) {
+        vReal[i] = (float)buffer[i];
+        vImag[i] = 0.0;
+      }
+
+      if (!_setup_done){ // ETAPA SETUP (1): Enviar cierre para calculo de metricas
+        sendBlock(SPI_CS_2, HEADER_END);
       }
 
       // --- LIMPIEZA Y REPETICIÓN ---
